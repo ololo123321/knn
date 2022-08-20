@@ -120,7 +120,7 @@ class IndexerPQ(BaseIndexer):
             else:
                 raise
             dists = f(data_enc, codebook_dist)
-        elif DistanceComputationModes.SDC:
+        elif dc_mode == DistanceComputationModes.SDC:
             queries_enc = np.zeros((queries.shape[0], self.nb), dtype=np.uint8)
             for i in range(self.nb):
                 s = np.s_[i * self.d:(i + 1) * self.d]
@@ -128,7 +128,7 @@ class IndexerPQ(BaseIndexer):
                 queries_enc[:, i] = kmeans.transform(queries[:, s]).argmin(1)
             xs = np.arange(self.nb).astype(np.int32)[:, None, None]
             ys = queries_enc.transpose(1, 0)[:, :, None]  # [nb, m, 1]
-            zs = self._data_enc.transpose(1, 0)[:, None, :]  # [nb, 1, n]
+            zs = data_enc.transpose(1, 0)[:, None, :]  # [nb, 1, n]
             dists = self._adc_dists[xs, ys, zs].transpose(1, 2, 0).sum(-1)  # [nb, m, n] -> [m, n, nb] -> [m, n]
         else:
             raise
