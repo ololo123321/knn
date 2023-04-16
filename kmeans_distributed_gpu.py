@@ -23,7 +23,7 @@ def torch_put_2d(x, indices, values):
 
 if __name__ == "__main__":
     # process group
-    torch.distributed.init_process_group(backend="nccl", init_method="env://")
+    dist.init_process_group(backend="nccl", init_method="env://")
     local_rank = dist.get_rank()
     world_size = dist.get_world_size()
     device = torch.device("cuda", local_rank)
