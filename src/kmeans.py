@@ -150,3 +150,16 @@ class KMeans:
         for i in range(cluster_ids_unique.shape[0]):
             centroids_upd[cluster_ids_unique[i]] = groups[i].mean(0)
         return centroids_upd
+
+    @staticmethod
+    def _step_no_loop_v2(data: np.ndarray, centroids: np.ndarray) -> np.ndarray:
+        """
+        медленно из-за np.add.at
+        """
+        centroids_upd = np.zeros_like(centroids)
+        dists = cdist(data, centroids)  # [n, k]
+        cluster_ids = dists.argmin(1)  # [n]
+        np.add.at(centroids_upd, cluster_ids, data)
+        unique_ids, counts = np.unique(cluster_ids, return_counts=True)
+        centroids_upd[unique_ids] /= counts[:, None]
+        return centroids_upd
