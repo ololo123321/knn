@@ -4,6 +4,9 @@ import torch.distributed as dist
 import numpy as np
 
 
+EPS = 1e-8
+
+
 def torch_put_2d(x, indices, values):
     """
     torch 2d analogue of np.add.at
@@ -19,6 +22,11 @@ def torch_put_2d(x, indices, values):
     indices_flat = (indices[:, None] * d + torch.arange(d, device=indices.device)[None, :]).flatten()
     x.put_(indices_flat, values_flat, accumulate=True)
     return x
+
+
+def l2_normalize(x):
+    norm = (x ** 2).sum(1) ** 0.5
+    return x / (norm + EPS)
 
 
 if __name__ == "__main__":
@@ -40,6 +48,7 @@ if __name__ == "__main__":
     x = torch.rand((n, d)).half()
 
     # start training
+    spherical = False  # queries and data must be on hypersphere
     # nc = 1048576
     # nc = 131072
     nc = 1024
@@ -52,6 +61,9 @@ if __name__ == "__main__":
         log(f"Initialization try: {i_init}")
         idx = torch.randperm(n)[:nc]
         centroids = x[idx].clone().to(device)
+        if spherical:
+            # ensure centroids to be on hypersphere
+            centroids = l2_normalize(centroids)
         loss_it = float("inf")
         for i_iter in range(niter):
             log(f"Iteration: {i_iter}")
@@ -64,6 +76,8 @@ if __name__ == "__main__":
             for start in tqdm.trange(0, n, batch_size, position=local_rank, desc=f"rank {local_rank}"):
                 end = min(n, start + batch_size)
                 xb = x[start:end].to(device)
+                if spherical:
+                    xb = l2_normalize(xb)
                 s = xb @ centroids_t  # [b, nc]
                 norm_x = torch.square(xb).sum(1)[:, None]  # [b, 1]
                 dists = norm_x + norm_c - 2.0 * s  # [b, nc]
@@ -73,17 +87,20 @@ if __name__ == "__main__":
                 torch_put_2d(sums, m.indices, xb.float())
                 counts.put_(m.indices, torch.ones_like(m.indices), accumulate=True)
                 loss.put_(m.indices, m.values.float(), accumulate=True)
-            loss = (loss / (counts.float() + 1e-8)).mean()
-            dist.barrier()
+            loss = (loss / (counts.float() + EPS)).mean()
+            dist.barrier()  # to ensure correct computation of centroids
             dist.reduce(sums, 0, op=dist.ReduceOp.SUM)
             dist.reduce(counts, 0, op=dist.ReduceOp.SUM)
             dist.reduce(loss, 0, op=dist.ReduceOp.SUM)
-            centroids = sums / counts[:, None].float()
+            centroids = sums / (counts[:, None].float() + EPS)
+            if spherical:
+                # need to put centroids on hypersphere too
+                centroids = l2_normalize(centroids)
             loss_it = (loss / world_size).item()
             log(f"loss: {loss_it}")
-            dist.barrier()  # TODO: мб лишний
-        if loss_it < best_score:
-            best_centroids = centroids
+            if loss_it < best_score:
+                best_centroids = centroids
+            dist.barrier()  # to ensure broadcasting of correct centroids
     if local_rank == 0:
         log("save centroids")
         np.save("centroids.npy", best_centroids.to("cpu").numpy())
